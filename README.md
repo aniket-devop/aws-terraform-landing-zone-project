@@ -32,40 +32,47 @@ This project was built to practice real-world AWS networking and security patter
 
 ```
 aws-terraform-landing-zone-project/
-├── modules/
-│   ├── vpc/              # VPC, subnets, route tables, IGW
-│   ├── nat-gateway/      # NAT Gateway + EIP per AZ
-│   ├── alb/              # Application Load Balancer + Target Group
-│   ├── ec2/              # EC2 instances, Security Groups, IAM roles
-│   └── backend/          # S3 + DynamoDB remote state resources
-├── environments/
-│   └── dev/              # Root module wiring the above together
+├── modules/                # VPC, ALB, EC2, IAM, etc. as reusable modules
+├── environments/            # Environment-specific variable files
+├── bootstrap/                # One-time setup for S3 + DynamoDB remote state
+├── diagrams/
+│   ├── architecture.png     # Architecture diagram
+│   └── README.md
+├── images/                   # AWS Console screenshots (deployment proof)
+│   ├── aws-subnets.png
+│   ├── ec2-instance.png
+│   ├── application-load-balancer.png
+│   ├── alb-details.png
+│   └── target-group-health.png
 ├── .github/
-│   └── workflows/
-│       └── terraform.yml # fmt / validate / plan on PR
-├── images/                # Architecture diagram + deployment screenshots
+│   └── workflows/            # fmt / validate / plan on every PR
+├── backend.tf
+├── main.tf
+├── outputs.tf
+├── providers.tf
+├── variables.tf
+├── versions.tf
 └── README.md
 ```
-> Adjust this tree to match your actual folder layout before committing.
 
 ## Deployment Proof
 
 Screenshots from the actual AWS Console after running `terraform apply`, confirming the infrastructure was provisioned as designed:
 
 **Subnets — public and private subnets created across 2 Availability Zones**
-![Subnets across AZs](c:\Users\aniket kumar\Downloads\subnets.png)
+![Subnets across AZs](images/aws-subnets.png)
 
 **EC2 Instance — running in a private subnet**
-![EC2 instance running](./images/ec2-instance.png)
+![EC2 instance running](images/ec2-instance.png)
 
 **Application Load Balancer — active and internet-facing**
-![Load balancer active](./images/load-balancer.png)
+![Load balancer active](images/application-load-balancer.png)
 
 **ALB Details — VPC, availability zones, and DNS name**
-![ALB configuration details](./images/alb-details.png)
+![ALB configuration details](images/alb-details.png)
 
 **Target Group Health Check — EC2 instance registered and healthy behind the ALB**
-![Target group healthy](./images/target-group-health.png)
+![Target group healthy](images/target-group-health.png)
 
 ## How to Deploy
 
