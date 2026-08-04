@@ -120,4 +120,6 @@ This catches broken or misconfigured infrastructure code before it ever reaches 
 
 **Aniket Kumar**
 DevOps Engineer | Terraform · Azure · AWS · Docker · Kubernetes · GitHub Actions
-[GitHub](https://github.com/aniket-devop) · [LinkedIn](#)
+
+[![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/aniket-devop)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://linkedin.com/in/aniket484)
