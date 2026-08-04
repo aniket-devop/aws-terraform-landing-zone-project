@@ -1,210 +1,116 @@
-# AWS Landing Zone — Multi-AZ VPC, ALB, and EC2 with Terraform
+# AWS Landing Network — Terraform Infrastructure Project
 
-A modular, production-style AWS landing zone built with Terraform: a 2-AZ VPC
-with public/private subnet segmentation, NAT Gateway egress, an internet-facing
-Application Load Balancer, EC2 instances in private subnets with least-privilege
-IAM (no SSH keys, access via SSM Session Manager), remote state in S3 with
-DynamoDB locking, and a GitHub Actions CI pipeline that runs `fmt`, `validate`,
-and `plan` on every pull request.
+A multi-AZ AWS network built entirely with Terraform: a VPC with public/private subnets, an Application Load Balancer routing traffic to EC2 instances in private subnets, a NAT Gateway for outbound-only internet access, scoped IAM roles, and a remote Terraform state backend with locking — all deployable through a GitHub Actions pipeline.
 
-![Architecture](diagrams/architecture.png)
-*(place your architecture diagram at `diagrams/architecture.png` — see `diagrams/README.md`)*
+This project was built to practice real-world AWS networking and security patterns (not just spinning up a single EC2 instance), and to get hands-on with Terraform remote state, IAM least-privilege, and CI-driven infra validation.
 
----
+## Architecture
 
-## 1. Architecture
+![AWS Landing Zone Architecture](diagrams/architecture.png)
 
-```
-                              Internet
-                                 │
-                        ┌────────▼────────┐
-                        │ Internet Gateway │
-                        └────────┬────────┘
-                                 │
-        ┌────────────────────────┴────────────────────────┐
-        │                        VPC 10.0.0.0/16            │
-        │                                                    │
-        │   AZ-a                              AZ-b           │
-        │  ┌──────────────────┐        ┌──────────────────┐ │
-        │  │ Public Subnet     │        │ Public Subnet     │ │
-        │  │ 10.0.0.0/24       │        │ 10.0.1.0/24       │ │
-        │  │  ┌───────────┐    │        │   ┌───────────┐   │ │
-        │  │  │ NAT GW-a  │    │        │   │ NAT GW-b  │   │ │
-        │  │  └───────────┘    │        │   └───────────┘   │ │
-        │  │        ALB (spans both public subnets)          │ │
-        │  └─────────┬─────────┘        └─────────┬─────────┘ │
-        │            │                             │           │
-        │  ┌─────────▼─────────┐        ┌─────────▼─────────┐ │
-        │  │ Private Subnet     │        │ Private Subnet     │ │
-        │  │ 10.0.10.0/24       │        │ 10.0.11.0/24       │ │
-        │  │  ┌──────────────┐  │        │  ┌──────────────┐  │ │
-        │  │  │  EC2 app-1   │  │        │  │  EC2 app-2   │  │ │
-        │  │  └──────────────┘  │        │  └──────────────┘  │ │
-        │  └────────────────────┘        └────────────────────┘ │
-        └────────────────────────────────────────────────────────┘
-```
+**How it works:**
+- A single VPC (`10.0.0.0/16`) spans two Availability Zones for high availability.
+- Each AZ has a **public subnet** (Application Load Balancer + NAT Gateway) and a **private subnet** (EC2 instance, Security Group, IAM Role).
+- The **Internet Gateway** allows inbound traffic only to the public subnets; EC2 instances in the private subnets have no direct internet exposure.
+- The **NAT Gateway** gives private subnet resources outbound-only internet access (e.g., for package updates), with all egress traffic routed through it.
+- **Security Groups** on the EC2 instances allow traffic only from the ALB — nothing else can reach the instances directly.
+- **IAM Roles** attached to EC2 are scoped to what the instance actually needs, instead of using broad managed admin policies.
+- **Terraform remote state** is stored in an S3 bucket, with a DynamoDB table handling state locking so the state can't be corrupted by concurrent applies.
+- A **GitHub Actions** pipeline runs `terraform fmt`, `terraform validate`, and `terraform plan` on every pull request, before anything is applied.
 
-**Traffic flow:** Internet → IGW → ALB (public subnets, both AZs) →
-Target Group → EC2 instances (private subnets, both AZs) on port 80.
-EC2 instances have no public IP and no inbound rule from the internet;
-their only inbound path is from the ALB's security group. Outbound
-internet access for patching/package installs goes through the NAT
-Gateway in the instance's own AZ.
+## Tech Stack
 
-**Why this design:**
-
-| Decision | Reasoning |
+| Category | Tools |
 |---|---|
-| 2 AZs, symmetric public/private subnets | Baseline HA — losing one AZ doesn't take the app down |
-| One NAT Gateway per AZ (prod) | Avoids NAT being a single point of failure across AZs; `single_nat_gateway=true` in dev trades this for lower cost |
-| EC2 in private subnets only | App servers are never directly internet-reachable; ALB is the sole entry point |
-| No SSH key, IAM role + SSM instead | Removes an entire class of risk (leaked/shared keys, open port 22) and gives auditable, IAM-governed shell access |
-| Security groups reference each other, not CIDRs | `ec2_sg` allows traffic *from* `alb_sg`, not from an IP range — correct even if the ALB's IP changes |
-| Remote state in S3 + DynamoDB lock | Enables team collaboration and prevents concurrent `apply` corruption |
-| Modules per concern (vpc/sg/iam/alb/ec2) | Each module is independently testable, reusable across environments, and readable in isolation |
+| Cloud Provider | AWS (VPC, EC2, ALB, Target Groups, IAM, S3, DynamoDB, NAT Gateway) |
+| Infrastructure as Code | Terraform (remote state, modules, plan/apply workflow) |
+| CI/CD | GitHub Actions |
+| Networking | Multi-AZ VPC, public/private subnet segregation, NAT Gateway |
+| Security | Scoped IAM instance roles, Security Groups restricting ALB-only ingress |
 
-## 2. Repository Structure
+## Repository Structure
 
 ```
-aws-landing-zone/
+aws-terraform-landing-zone-project/
 ├── modules/
-│   ├── vpc/                 # VPC, subnets, IGW, NAT GW(s), route tables
-│   ├── security-groups/     # ALB SG, EC2 SG (SG-to-SG references)
-│   ├── iam/                 # EC2 role, SSM policy, instance profile
-│   ├── alb/                 # ALB, target group, listener
-│   └── ec2/                 # EC2 instances + target group attachment
+│   ├── vpc/              # VPC, subnets, route tables, IGW
+│   ├── nat-gateway/      # NAT Gateway + EIP per AZ
+│   ├── alb/              # Application Load Balancer + Target Group
+│   ├── ec2/              # EC2 instances, Security Groups, IAM roles
+│   └── backend/          # S3 + DynamoDB remote state resources
 ├── environments/
-│   ├── dev.tfvars           # Dev-sized, cost-optimized (single NAT)
-│   └── prod.tfvars          # Prod-sized (NAT per AZ, larger instances)
-├── bootstrap/                # One-time: creates the S3 state bucket + DynamoDB lock table
-├── .github/workflows/
-│   └── terraform-ci.yml     # fmt -> init -> validate -> plan on every PR
-├── diagrams/                 # Architecture diagram(s)
-├── main.tf                   # Root module — wires the child modules together
-├── providers.tf              # AWS provider + default_tags
-├── variables.tf               # Root input variables
-├── outputs.tf                 # Root outputs (ALB DNS, VPC ID, etc.)
-├── backend.tf                 # S3 remote state config (commented until bootstrapped)
-├── versions.tf                 # Terraform + provider version pins
-└── .gitignore
+│   └── dev/              # Root module wiring the above together
+├── .github/
+│   └── workflows/
+│       └── terraform.yml # fmt / validate / plan on PR
+├── images/                # Architecture diagram + deployment screenshots
+└── README.md
 ```
+> Adjust this tree to match your actual folder layout before committing.
 
-## 3. Prerequisites
+## Deployment Proof
 
-- Terraform >= 1.6
-- An AWS account + credentials configured locally (`aws configure` or SSO)
-- AWS CLI v2 (optional, useful for verification)
+Screenshots from the actual AWS Console after running `terraform apply`, confirming the infrastructure was provisioned as designed:
 
-## 4. Deployment Guide
+**Subnets — public and private subnets created across 2 Availability Zones**
+![Subnets across AZs](c:\Users\aniket kumar\Downloads\subnets.png)
 
-### Step 1 — Bootstrap remote state (one time only)
+**EC2 Instance — running in a private subnet**
+![EC2 instance running](./images/ec2-instance.png)
+
+**Application Load Balancer — active and internet-facing**
+![Load balancer active](./images/load-balancer.png)
+
+**ALB Details — VPC, availability zones, and DNS name**
+![ALB configuration details](./images/alb-details.png)
+
+**Target Group Health Check — EC2 instance registered and healthy behind the ALB**
+![Target group healthy](./images/target-group-health.png)
+
+## How to Deploy
 
 ```bash
-cd bootstrap
+# Clone the repo
+git clone https://github.com/aniket-devop/aws-terraform-landing-zone-project.git
+cd aws-terraform-landing-zone-project
+
+# Initialize (pulls remote state config from S3 + DynamoDB)
 terraform init
+
+# Review the plan
+terraform plan
+
+# Apply
 terraform apply
-# note the bucket_name and dynamodb_table_name outputs
 ```
 
-### Step 2 — Point the root module at that backend
+> Requires AWS CLI configured with credentials that have permissions for VPC, EC2, ELB, IAM, S3, and DynamoDB.
 
-Edit `backend.tf` in the project root, uncomment the block, and fill in the
-`bucket` and `dynamodb_table` values from Step 1. Then:
+## CI/CD Pipeline
 
-```bash
-cd ..
-terraform init -migrate-state
-```
+Every pull request triggers a GitHub Actions workflow that runs:
+1. `terraform fmt -check` — enforces consistent formatting
+2. `terraform validate` — catches syntax/config errors
+3. `terraform plan` — shows exactly what would change, before merging
 
-### Step 3 — Format, validate, plan
+This catches broken or misconfigured infrastructure code before it ever reaches `apply`.
 
-```bash
-terraform fmt -recursive
-terraform validate
-terraform plan -var-file=environments/dev.tfvars
-```
+## Key Design Decisions
 
-### Step 4 — Apply
+- **Private subnets for compute**: EC2 instances are never placed in public subnets — all inbound traffic must pass through the ALB.
+- **NAT Gateway per AZ**: avoids a single point of failure for outbound traffic if one AZ has issues.
+- **Remote state with locking**: prevents two people (or two pipeline runs) from applying at the same time and corrupting state.
+- **Least-privilege IAM**: instance roles are scoped to specific actions instead of attaching AWS-managed admin policies.
 
-```bash
-terraform apply -var-file=environments/dev.tfvars
-```
+## Future Improvements
 
-### Step 5 — Verify
-
-```bash
-terraform output alb_dns_name
-curl http://$(terraform output -raw alb_dns_name)
-```
-
-You should get back a simple HTML page identifying the responding instance.
-Refresh a few times — the ALB round-robins between the two EC2 targets.
-
-### Step 6 — Connect to an instance (no SSH key needed)
-
-```bash
-aws ssm start-session --target $(terraform output -json ec2_instance_ids | jq -r '.[0]')
-```
-
-### Step 7 — Tear down
-
-```bash
-terraform destroy -var-file=environments/dev.tfvars
-```
-(Leave the bootstrap state bucket/table in place unless you're fully done with the project.)
-
-### Running against `prod.tfvars`
-
-Same commands, swap the `-var-file`. In a real multi-account setup you'd
-also point `backend.tf`'s `key` at a different state path per environment
-(e.g. via `-backend-config` on `init`) — see comments in `backend.tf`.
-
-## 5. CI Pipeline (GitHub Actions)
-
-On every PR touching `.tf`/`.tfvars` files, `.github/workflows/terraform-ci.yml`:
-1. Checks formatting (`terraform fmt -check`)
-2. Initializes without a backend (`-backend=false`) so CI doesn't need state access for validation
-3. Runs `terraform validate`
-4. Runs `terraform plan -var-file=environments/dev.tfvars` and posts the plan as a PR comment
-
-It authenticates to AWS via **OIDC** (`aws-actions/configure-aws-credentials`
-assuming an IAM role) rather than long-lived access keys stored as secrets —
-set up an IAM role with a trust policy for `token.actions.githubusercontent.com`
-and put its ARN in the `AWS_ROLE_TO_ASSUME` repo secret.
-
-Nothing in this pipeline applies infrastructure — `apply` is intentionally a
-manual, human-triggered step.
-
-## 6. Cost Notes
-
-Running this continuously will incur cost, mainly from NAT Gateway(s)
-(hourly + per-GB) and the ALB (hourly + per-LCU). `dev.tfvars` uses a single
-shared NAT Gateway to minimize this. Always `terraform destroy` when you're
-done experimenting.
-
-## 7. Improvements for a Real Production Environment
-
-This project is deliberately scoped to be readable and interview-explainable.
-A few things I'd add before this ran a real production workload:
-
-- **HTTPS**: ACM certificate + HTTPS listener on the ALB, HTTP listener redirecting to HTTPS instead of forwarding
-- **Auto Scaling Group** instead of two static `aws_instance` resources — scale on CPU/request count, replace unhealthy instances automatically
-- **WAF** in front of the ALB for common web exploits and rate limiting
-- **Multi-account structure** (e.g. AWS Organizations + separate dev/staging/prod accounts) instead of one account with tfvars-per-environment
-- **VPC Flow Logs** shipped to CloudWatch/S3 for network-level audit trail
-- **Config drift + policy-as-code**: `tflint`, `checkov`/`tfsec` in CI, and AWS Config rules
-- **Secrets**: anything beyond this demo would use Secrets Manager/Parameter Store, not environment variables or user_data
-- **Golden AMI / immutable infrastructure**: bake the app into an AMI via Packer instead of installing packages in `user_data` at boot
-- **Terraform Cloud/Enterprise or Atlantis** for a proper apply pipeline with approvals, instead of local/manual `apply`
-- **Cross-region or multi-region DR** if the workload's availability requirements justify it
-
-## 8. Interview Questions
-
-See [`INTERVIEW_QUESTIONS.md`](./INTERVIEW_QUESTIONS.md) for a set of questions
-and model answers based on the specific decisions made in this project —
-useful for prepping to talk about it in an interview.
+- Add HTTPS listener on the ALB with an ACM certificate
+- Add Auto Scaling Group instead of a static EC2 instance
+- Add CloudWatch alarms and a basic monitoring dashboard
+- Parameterize environments (dev/staging/prod) using Terraform workspaces or separate `.tfvars`
 
 ## Author
 
-Aniket Kumar — DevOps Engineer
-[github.com/aniket-devop](https://github.com/aniket-devop) · [linkedin.com/in/aniket484](https://linkedin.com/in/aniket484)
+**Aniket Kumar**
+DevOps Engineer | Terraform · Azure · AWS · Docker · Kubernetes · GitHub Actions
+[GitHub](https://github.com/aniket-devop) · [LinkedIn](#)

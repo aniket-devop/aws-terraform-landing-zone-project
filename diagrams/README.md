@@ -11,4 +11,3 @@ It is referenced from the root `README.md` as:
 
 ```markdown
 ![AWS Landing Zone Architecture](diagrams/architecture.png)
-```
