@@ -1,41 +1,56 @@
-# AWS Terraform Landing Zone
+<div align="center">
 
-**A production-style, multi-AZ AWS network built entirely with Terraform: private compute behind an Application Load Balancer, secured access with no SSH, remote state with locking, and a CI pipeline that authenticates to AWS with OIDC.**
+# ☁️ AWS Terraform Landing Zone
+
+**A production-style, multi-AZ AWS network built entirely with Terraform.**
+Private compute behind an Application Load Balancer, SSH-free access, remote state with locking, and a CI pipeline that talks to AWS through OIDC.
 
 [![Terraform CI](https://github.com/aniket-devop/aws-terraform-landing-zone-project/actions/workflows/terraform-ci.yml/badge.svg)](https://github.com/aniket-devop/aws-terraform-landing-zone-project/actions/workflows/terraform-ci.yml)
 ![Terraform](https://img.shields.io/badge/Terraform-844FBA?logo=terraform&logoColor=white)
 ![AWS](https://img.shields.io/badge/AWS-232F3E?logo=amazonaws&logoColor=white)
 ![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)
+![IaC](https://img.shields.io/badge/Infrastructure-as%20Code-blueviolet)
+
+[Architecture](#architecture) · [Highlights](#highlights) · [Quick Start](#quick-start) · [Security](#security-highlights) · [CI/CD](#cicd-pipeline) · [Screenshots](#deployment-proof)
+
+<br>
 
 ![AWS Landing Zone Architecture](diagrams/architecture.png)
 
+<br>
+
+| 🌍 **2** | 🧩 **5** | 🚀 **2** | 🔒 **0** | 🔑 **0** |
+|:---:|:---:|:---:|:---:|:---:|
+| Availability Zones | Reusable modules | Environments (dev, prod) | Open SSH ports | Long-lived AWS keys in CI |
+
+</div>
+
 ## Highlights
 
-- **Modular Terraform:** five reusable modules (`vpc`, `security-groups`, `iam`, `alb`, `ec2`) composed by a single root configuration.
-- **Multi-AZ, private-by-default:** EC2 instances live in private subnets with no public IP; the ALB is the only entry point.
-- **No SSH, anywhere:** access goes through AWS SSM Session Manager. No inbound SSH rule, no key pair to distribute.
-- **Least-privilege IAM:** the instance role has only the SSM core policy plus a CloudWatch Logs policy scoped to one log-group prefix.
-- **Remote state done properly:** S3 (versioned, encrypted, public access blocked) with DynamoDB locking, created by a separate bootstrap config.
-- **Keyless CI:** GitHub Actions runs `fmt`, `validate` and `plan` on every pull request, using OIDC instead of stored AWS access keys.
-- **One codebase, two environments:** dev and prod differ only in `.tfvars` (NAT topology, instance size and count).
+- 🧱 **Modular Terraform:** five reusable modules (`vpc`, `security-groups`, `iam`, `alb`, `ec2`) composed by one root configuration.
+- 🛡️ **Private by default:** EC2 instances sit in private subnets with no public IP. The ALB is the only entry point.
+- 🚫 **No SSH, anywhere:** access goes through AWS SSM Session Manager. No inbound SSH rule, no key pair to distribute.
+- 🔐 **Least-privilege IAM:** the instance role has only the SSM core policy plus a CloudWatch Logs policy scoped to one log-group prefix.
+- 🗄️ **Remote state done properly:** S3 (versioned, encrypted, public access blocked) with DynamoDB locking, created by a separate bootstrap config.
+- 🤖 **Keyless CI:** GitHub Actions runs `fmt`, `validate` and `plan` on every pull request using OIDC instead of stored AWS access keys.
+- 🎛️ **One codebase, two environments:** dev and prod differ only in `.tfvars` (NAT topology, instance size and count).
 
-## At a Glance
+> [!NOTE]
+> This is a personal, sandbox-scale project. It is **not** an enterprise landing zone in the AWS Control Tower sense: there is no AWS Organizations setup, no Service Control Policies and no multi-account governance. The compute tier runs a demo Apache page, not a real application.
 
-| | |
-|---|---|
-| **Cloud** | AWS: VPC, EC2, ALB, IAM, SSM, S3, DynamoDB, NAT Gateway |
-| **IaC** | Terraform `>= 1.6.0, < 2.0.0`, AWS provider `~> 5.60` |
-| **CI/CD** | GitHub Actions, OIDC to AWS, plan posted as PR comment |
-| **Environments** | `dev`, `prod` (via `environments/*.tfvars`) |
-| **Region** | `us-east-1`, across two Availability Zones |
+## Architecture
 
-## What This Is / Isn't
-
-**Is:** a personal, sandbox-scale AWS networking and security foundation, deployable per environment from one Terraform configuration.
-
-**Isn't:** an enterprise landing zone in the AWS Control Tower sense. There is no AWS Organizations setup, no Service Control Policies, and no multi-account governance. The compute tier runs a demo Apache page, not a real application.
-
-## How It Works
+```mermaid
+flowchart LR
+    U([Internet users]) --> ALB["Application Load Balancer<br/>public subnets"]
+    ALB --> A["EC2 - AZ a<br/>private subnet"]
+    ALB --> B["EC2 - AZ b<br/>private subnet"]
+    A --> NAT["NAT Gateway"]
+    B --> NAT
+    NAT --> IGW["Internet Gateway"]
+    SSM(["SSM Session Manager"]) -.-> A
+    SSM -.-> B
+```
 
 - A single VPC (`10.0.0.0/16`) spans two Availability Zones. Each AZ has a **public subnet** (ALB, NAT Gateway) and a **private subnet** (EC2).
 - The **Internet Gateway** serves only the public subnets. Instances are never directly exposed to the internet.
@@ -44,7 +59,18 @@
 - Instances (Amazon Linux 2023, Apache httpd) are spread round-robin across private subnets and registered in the ALB target group. IMDSv2 is enforced and the root volume is encrypted.
 - **Terraform state** lives in S3 with a DynamoDB table for locking, so concurrent applies cannot corrupt it.
 
-> The diagram shows the **prod** topology. Dev differs as described below.
+### Module composition
+
+```mermaid
+flowchart LR
+    vpc --> sg["security-groups"]
+    vpc --> alb
+    sg --> alb
+    vpc --> ec2
+    sg --> ec2
+    iam --> ec2
+    alb --> ec2
+```
 
 ## Environments
 
@@ -53,27 +79,27 @@
 | Instance type | `t2.micro` | `t3.small` |
 | EC2 instances | 1 | 2 |
 | NAT Gateways | 1 (shared) | 1 per AZ |
+| Region | `us-east-1` | `us-east-1` |
 
-Both use the same modules and differ only in `environments/*.tfvars`. With one instance, dev runs in a single AZ; prod spreads two instances across both. The `environment` variable also accepts `staging`, but no `staging.tfvars` exists yet.
+Both use the same modules and differ only in `environments/*.tfvars`. With one instance, dev runs in a single AZ; prod spreads two instances across both. The diagram above shows the **prod** topology. The `environment` variable also accepts `staging`, but no `staging.tfvars` exists yet.
 
 ## Deployment Proof
 
 Screenshots from the AWS Console after `terraform apply`, confirming the infrastructure was provisioned as designed.
 
-**Subnets:** public and private subnets across 2 Availability Zones
-![Subnets across AZs](images/aws-subnets.png)
-
-**EC2 instance:** running in a private subnet
-![EC2 instance running](images/ec2-instance.png)
-
-**Application Load Balancer:** active and internet-facing
-![Load balancer active](images/application-load-balancer.png)
-
-**ALB details:** VPC, availability zones and DNS name
-![ALB configuration details](images/alb-details.png)
-
-**Target group health:** EC2 instance registered and healthy behind the ALB
-![Target group healthy](images/target-group-health.png)
+<table>
+  <tr>
+    <td width="50%"><b>Subnets</b><br>Public and private subnets across 2 AZs<br><img src="images/aws-subnets.png" alt="Subnets across AZs"></td>
+    <td width="50%"><b>EC2 instance</b><br>Running in a private subnet<br><img src="images/ec2-instance.png" alt="EC2 instance running"></td>
+  </tr>
+  <tr>
+    <td width="50%"><b>Application Load Balancer</b><br>Active and internet-facing<br><img src="images/application-load-balancer.png" alt="Load balancer active"></td>
+    <td width="50%"><b>ALB details</b><br>VPC, availability zones and DNS name<br><img src="images/alb-details.png" alt="ALB configuration details"></td>
+  </tr>
+  <tr>
+    <td colspan="2"><b>Target group health</b><br>EC2 instance registered and healthy behind the ALB<br><img src="images/target-group-health.png" alt="Target group healthy"></td>
+  </tr>
+</table>
 
 ## Quick Start
 
@@ -98,8 +124,11 @@ terraform apply -var-file=environments/dev.tfvars
 curl http://$(terraform output -raw alb_dns_name)
 ```
 
+> [!WARNING]
+> NAT Gateways and the ALB are billed per hour even when idle. In `us-east-1` that is roughly $32/month per NAT Gateway plus data processing, and about $16/month for the ALB (check current AWS pricing). Run `terraform destroy` after testing.
+
 <details>
-<summary><b>Deployment details, state keys, SSM access, cost and cleanup</b></summary>
+<summary><b>Deployment details: state keys, SSM access, cleanup</b></summary>
 
 **Why a separate bootstrap?** Terraform cannot create the bucket it will use as its own backend in the same run, so `bootstrap/` creates the S3 bucket and DynamoDB table first, using local state.
 
@@ -115,8 +144,6 @@ terraform init -reconfigure -backend-config="key=aws-landing-zone/prod/terraform
 ```bash
 aws ssm start-session --target <instance-id>
 ```
-
-**Cost warning.** NAT Gateways and the ALB are billed per hour even when idle. In `us-east-1` that is roughly $32/month per NAT Gateway plus data processing, and about $16/month for the ALB (check current AWS pricing). Destroy the stack after testing.
 
 **Cleanup.**
 
@@ -176,21 +203,24 @@ aws-terraform-landing-zone-project/
 
 ## Security Highlights
 
-- EC2 instances have no public IP and no SSH ingress; access is through SSM Session Manager.
-- The EC2 Security Group accepts traffic only from the ALB Security Group.
-- IAM role limited to `AmazonSSMManagedInstanceCore` plus an inline CloudWatch Logs policy scoped to one log-group prefix.
-- IMDSv2 enforced (`http_tokens = "required"`), root EBS volume encrypted, ALB drops invalid header fields.
-- State bucket: versioning on, AES256 encryption, all public access blocked, `prevent_destroy`.
-- CI authenticates to AWS with GitHub OIDC, so no long-lived access keys are stored in GitHub.
+| Area | What is in place |
+|---|---|
+| **Instance access** | No public IP, no SSH ingress; access through SSM Session Manager |
+| **Network** | EC2 Security Group accepts traffic only from the ALB Security Group |
+| **IAM** | `AmazonSSMManagedInstanceCore` plus an inline CloudWatch Logs policy scoped to one log-group prefix |
+| **Instance hardening** | IMDSv2 enforced (`http_tokens = "required"`), encrypted root EBS volume, ALB drops invalid header fields |
+| **State** | Versioned S3 bucket, AES256 encryption, all public access blocked, `prevent_destroy`, DynamoDB locking |
+| **CI credentials** | GitHub OIDC role assumption, no long-lived access keys stored in GitHub |
 
 ## CI/CD Pipeline
 
-`.github/workflows/terraform-ci.yml` runs on pull requests to `main`, and on pushes to `main` that touch Terraform files:
+```mermaid
+flowchart LR
+    A[Pull request] --> B["fmt check"] --> C["init"] --> D["validate"] --> E["plan (dev)"] --> F["Plan posted as PR comment"]
+    G["GitHub OIDC token"] -.-> H["Assume AWS IAM role"] -.-> E
+```
 
-1. `terraform fmt -check -recursive`
-2. `terraform init -backend=false`
-3. `terraform validate`
-4. `terraform plan -var-file=environments/dev.tfvars`, posted as a PR comment
+`.github/workflows/terraform-ci.yml` runs on pull requests to `main`, and on pushes to `main` that touch Terraform files. It runs `terraform fmt -check -recursive`, `terraform init -backend=false`, `terraform validate`, and `terraform plan -var-file=environments/dev.tfvars`, then posts the plan as a PR comment.
 
 The plan runs with `-backend=false`, so it verifies that the configuration plans cleanly rather than diffing against deployed state. The pipeline never runs `apply`; apply is a deliberate manual step.
 
@@ -207,7 +237,7 @@ Required repository secrets: `AWS_ROLE_TO_ASSUME` (IAM role ARN assumed via OIDC
 
 ## Skills Demonstrated
 
-Terraform module design and composition · AWS networking (VPC, subnets, routing, NAT, ALB) · IAM least privilege · secure instance access with SSM · remote state and locking · environment parity with tfvars · CI for infrastructure with OIDC · cost-aware design trade-offs
+`Terraform modules` · `AWS networking (VPC, routing, NAT, ALB)` · `IAM least privilege` · `SSM Session Manager` · `Remote state and locking` · `Environment parity with tfvars` · `CI for infrastructure with OIDC` · `Cost-aware design trade-offs`
 
 ## Known Limitations
 
@@ -217,17 +247,23 @@ Terraform module design and composition · AWS networking (VPC, subnets, routing
 - The IAM role allows CloudWatch Logs delivery, but no log agent is installed on the instances yet.
 - No `staging` environment file yet.
 
-## Future Improvements
+## Roadmap
 
-- HTTPS listener with an ACM certificate, and HTTP-to-HTTPS redirect
-- Auto Scaling Group instead of static instances
-- CloudWatch agent, alarms and a basic dashboard
-- `staging.tfvars` and separate per-environment state backends
-- Gated `apply` automation with a manual approval environment
+- [ ] HTTPS listener with an ACM certificate, and HTTP-to-HTTPS redirect
+- [ ] Auto Scaling Group instead of static instances
+- [ ] CloudWatch agent, alarms and a basic dashboard
+- [ ] `staging.tfvars` and separate per-environment state backends
+- [ ] Gated `apply` automation with a manual approval environment
 
 ## Author
 
-**Aniket Kumar**: DevOps Engineer
+<div align="center">
+
+**Aniket Kumar** · DevOps Engineer
 
 [![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/aniket-devop)
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://linkedin.com/in/aniket484)
+
+⭐ If you found this project useful, consider giving it a star.
+
+</div>
